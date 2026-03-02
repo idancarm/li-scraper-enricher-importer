@@ -1,0 +1,11 @@
+{
+  "name": "li-scraper",
+  "version": "1.0.0",
+  "description": "Scrape LinkedIn contacts via Unipile, enrich with Apollo/Cargo, import to HubSpot",
+  "scripts": {
+    "scrape": "node scrape-contacts.js",
+    "enrich": "node enrich-contacts.js",
+    "import": "node import-to-hubspot.js"
+  },
+  "type": "module"
+}
