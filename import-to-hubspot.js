@@ -17,8 +17,8 @@ function batchCreate(contacts) {
       lastname: c.last_name,
       jobtitle: c.jobtitle || '',
       company: c.company || '',
-      linkedin_url: c.linkedin_url || '',
-      contact_source: 'linkedin-import',
+      hs_linkedin_url: c.linkedin_url || '',
+      do_not_email: 'true',
     },
   }));
 
