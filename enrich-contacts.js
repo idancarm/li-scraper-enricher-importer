@@ -2,7 +2,8 @@ import https from 'node:https';
 import { loadEnv, sleep, readJSON, writeJSON } from './lib.js';
 
 const env = loadEnv();
-const APOLLO_API_KEY = env.APOLLO_API_KEY;
+const APOLLO_SEARCH_KEY = env.APOLLO_SEARCH_API_KEY;
+const APOLLO_ENRICH_KEY = env.APOLLO_ENRICH_API_KEY;
 const CARGO_API_KEY = env.CARGO_API_KEY;
 
 const CONTACTS_FILE = 'data/contacts.json';
@@ -52,32 +53,44 @@ function postJSON(hostname, path, headers, body) {
 // --- Apollo ---
 
 async function tryApollo(contact) {
-  if (!APOLLO_API_KEY) return null;
+  if (!APOLLO_SEARCH_KEY || !APOLLO_ENRICH_KEY) return null;
 
-  const params = new URLSearchParams({
+  // Step 1: Search/match the person using the search key
+  const searchParams = new URLSearchParams({
     linkedin_url: contact.public_profile_url,
     first_name: contact.first_name,
     last_name: contact.last_name,
-    reveal_personal_emails: 'false',
   });
 
-  const data = await postJSON(
+  const searchData = await postJSON(
     'api.apollo.io',
-    `/api/v1/people/match?${params}`,
-    { 'x-api-key': APOLLO_API_KEY, 'Cache-Control': 'no-cache' },
+    `/api/v1/people/match?${searchParams}`,
+    { 'x-api-key': APOLLO_SEARCH_KEY, 'Cache-Control': 'no-cache' },
     {}
   );
 
-  const person = data.person;
+  const person = searchData.person;
   if (!person) return null;
-  if (!person.email) return null;
-  if (person.email_status === 'bounced') return null;
-  if (!person.organization) return null;
+  if (!person.id) return null;
+
+  // Step 2: Enrich the person using the enrich key to reveal email
+  const enrichData = await postJSON(
+    'api.apollo.io',
+    '/api/v1/people/match',
+    { 'x-api-key': APOLLO_ENRICH_KEY, 'Cache-Control': 'no-cache' },
+    { id: person.id, reveal_personal_emails: false }
+  );
+
+  const enriched = enrichData.person;
+  if (!enriched) return null;
+  if (!enriched.email) return null;
+  if (enriched.email_status === 'bounced') return null;
+  if (!enriched.organization) return null;
 
   return {
-    email: person.email,
-    company: person.organization.name || '',
-    jobtitle: person.title || '',
+    email: enriched.email,
+    company: enriched.organization.name || '',
+    jobtitle: enriched.title || '',
   };
 }
 
