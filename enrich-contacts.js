@@ -49,6 +49,19 @@ function postJSON(hostname, path, headers, body) {
   });
 }
 
+// --- Personal email domain filter ---
+
+const PERSONAL_DOMAINS = new Set([
+  'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com',
+  'aol.com', 'icloud.com', 'me.com', 'mail.com',
+  'yahoo.co.uk', 'hotmail.co.uk', 'live.com', 'msn.com',
+]);
+
+function isPersonalEmail(email) {
+  const domain = email.split('@')[1]?.toLowerCase();
+  return PERSONAL_DOMAINS.has(domain);
+}
+
 // --- Cargo (primary — finds email) ---
 
 async function tryCargo(contact) {
@@ -159,7 +172,18 @@ async function main() {
       console.log(`${label} — Cargo error: ${err.message}`);
     }
 
-    if (email) {
+    if (email && isPersonalEmail(email)) {
+      failCount++;
+      unenriched.push({
+        first_name: contact.first_name,
+        last_name: contact.last_name,
+        headline: contact.headline,
+        linkedin_url: contact.public_profile_url,
+        reason: 'personal_email',
+        email,
+      });
+      console.log(`${label} — SKIPPED (personal email: ${email})`);
+    } else if (email) {
       // 2. Try Apollo for company/title metadata
       const meta = await getApolloMeta(contact);
       const parsed = parseHeadline(contact.headline);
