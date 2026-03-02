@@ -2,11 +2,10 @@ import https from 'node:https';
 import { loadEnv, sleep, readJSON, writeJSON } from './lib.js';
 
 const env = loadEnv();
-const APOLLO_SEARCH_KEY = env.APOLLO_SEARCH_API_KEY;
-const APOLLO_ENRICH_KEY = env.APOLLO_ENRICH_API_KEY;
+const APOLLO_KEY = env.APOLLO_ENRICH_API_KEY;
 const CARGO_API_KEY = env.CARGO_API_KEY;
 
-const CONTACTS_FILE = 'data/contacts.json';
+const CONTACTS_FILE = 'data/filtered.json';
 const ENRICHED_FILE = 'data/enriched.json';
 const UNENRICHED_FILE = 'data/unenriched.json';
 
@@ -50,51 +49,7 @@ function postJSON(hostname, path, headers, body) {
   });
 }
 
-// --- Apollo ---
-
-async function tryApollo(contact) {
-  if (!APOLLO_SEARCH_KEY || !APOLLO_ENRICH_KEY) return null;
-
-  // Step 1: Search/match the person using the search key
-  const searchParams = new URLSearchParams({
-    linkedin_url: contact.public_profile_url,
-    first_name: contact.first_name,
-    last_name: contact.last_name,
-  });
-
-  const searchData = await postJSON(
-    'api.apollo.io',
-    `/api/v1/people/match?${searchParams}`,
-    { 'x-api-key': APOLLO_SEARCH_KEY, 'Cache-Control': 'no-cache' },
-    {}
-  );
-
-  const person = searchData.person;
-  if (!person) return null;
-  if (!person.id) return null;
-
-  // Step 2: Enrich the person using the enrich key to reveal email
-  const enrichData = await postJSON(
-    'api.apollo.io',
-    '/api/v1/people/match',
-    { 'x-api-key': APOLLO_ENRICH_KEY, 'Cache-Control': 'no-cache' },
-    { id: person.id, reveal_personal_emails: false }
-  );
-
-  const enriched = enrichData.person;
-  if (!enriched) return null;
-  if (!enriched.email) return null;
-  if (enriched.email_status === 'bounced') return null;
-  if (!enriched.organization) return null;
-
-  return {
-    email: enriched.email,
-    company: enriched.organization.name || '',
-    jobtitle: enriched.title || '',
-  };
-}
-
-// --- Cargo ---
+// --- Cargo (primary — finds email) ---
 
 async function tryCargo(contact) {
   if (!CARGO_API_KEY) return null;
@@ -106,11 +61,11 @@ async function tryCargo(contact) {
     { linkedinUrl: contact.public_profile_url }
   );
 
-  // Parse email from various response shapes
   let email =
     data.email ||
     data.data?.email ||
     data.result?.email ||
+    data.result?.output?.email ||
     data.output?.email ||
     null;
 
@@ -123,14 +78,41 @@ async function tryCargo(contact) {
   return { email };
 }
 
-// --- Headline parser ---
+// --- Apollo (supplement — finds company + title metadata) ---
+
+async function getApolloMeta(contact) {
+  if (!APOLLO_KEY) return null;
+
+  try {
+    const data = await postJSON(
+      'api.apollo.io',
+      '/api/v1/people/match',
+      { 'x-api-key': APOLLO_KEY, 'Cache-Control': 'no-cache' },
+      {
+        linkedin_url: contact.public_profile_url,
+        first_name: contact.first_name,
+        last_name: contact.last_name,
+      }
+    );
+
+    const person = data.person;
+    if (!person) return null;
+
+    return {
+      company: person.organization?.name || '',
+      jobtitle: person.title || '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+// --- Headline parser (fallback for company/title) ---
 
 function parseHeadline(headline) {
   if (!headline) return { jobtitle: '', company: '' };
-  // Try "Title at Company" pattern
   const atMatch = headline.match(/^(.+?)\s+at\s+(.+)$/i);
   if (atMatch) return { jobtitle: atMatch[1].trim(), company: atMatch[2].trim() };
-  // Try "Title | Company" or "Title - Company"
   const sepMatch = headline.match(/^(.+?)\s*[|\-–—]\s*(.+)$/);
   if (sepMatch) return { jobtitle: sepMatch[1].trim(), company: sepMatch[2].trim() };
   return { jobtitle: headline, company: '' };
@@ -141,14 +123,13 @@ function parseHeadline(headline) {
 async function main() {
   const contacts = readJSON(CONTACTS_FILE);
   if (contacts.length === 0) {
-    console.error('No contacts found. Run scrape-contacts.js first.');
+    console.error('No contacts found. Run filter-contacts.js first.');
     process.exit(1);
   }
 
   const enriched = readJSON(ENRICHED_FILE);
   const unenriched = readJSON(UNENRICHED_FILE);
 
-  // Build set of already-processed identifiers for resume
   const processed = new Set([
     ...enriched.map((c) => c.linkedin_url),
     ...unenriched.map((c) => c.linkedin_url),
@@ -157,7 +138,6 @@ async function main() {
   const remaining = contacts.filter((c) => !processed.has(c.public_profile_url));
   console.log(`Total: ${contacts.length} | Already processed: ${processed.size} | Remaining: ${remaining.length}`);
 
-  let apolloCount = 0;
   let cargoCount = 0;
   let failCount = 0;
 
@@ -165,55 +145,38 @@ async function main() {
     const contact = remaining[i];
     const label = `[${processed.size + i + 1}/${contacts.length}] ${contact.first_name} ${contact.last_name}`;
 
-    // 1. Try Apollo
-    let result = null;
+    // 1. Try Cargo for email
+    let email = null;
     try {
-      result = await tryApollo(contact);
-      if (result) {
-        console.log(`${label} — Apollo ✓`);
-        apolloCount++;
-      }
+      const cargoResult = await tryCargo(contact);
+      if (cargoResult) email = cargoResult.email;
     } catch (err) {
       if (err.message === 'RATE_LIMITED') {
-        console.error(`\nAPOLLO RATE LIMITED. Halting. Re-run to resume.`);
-        console.log(`Progress: Apollo=${apolloCount} Cargo=${cargoCount} Failed=${failCount}`);
+        console.error(`\nCARGO RATE LIMITED. Halting. Re-run to resume.`);
+        console.log(`Progress: Enriched=${cargoCount} Failed=${failCount}`);
         process.exit(1);
       }
-      console.log(`${label} — Apollo error: ${err.message}`);
+      console.log(`${label} — Cargo error: ${err.message}`);
     }
 
-    // 2. Try Cargo if Apollo didn't work
-    if (!result) {
-      await sleep(500); // brief pause between APIs
-      try {
-        result = await tryCargo(contact);
-        if (result) {
-          console.log(`${label} — Cargo ✓`);
-          cargoCount++;
-        }
-      } catch (err) {
-        if (err.message === 'RATE_LIMITED') {
-          console.error(`\nCARGO RATE LIMITED. Halting. Re-run to resume.`);
-          console.log(`Progress: Apollo=${apolloCount} Cargo=${cargoCount} Failed=${failCount}`);
-          process.exit(1);
-        }
-        console.log(`${label} — Cargo error: ${err.message}`);
-      }
-    }
-
-    if (result) {
+    if (email) {
+      // 2. Try Apollo for company/title metadata
+      const meta = await getApolloMeta(contact);
       const parsed = parseHeadline(contact.headline);
+
       enriched.push({
         first_name: contact.first_name,
         last_name: contact.last_name,
-        email: result.email,
-        company: result.company || parsed.company,
-        jobtitle: result.jobtitle || parsed.jobtitle,
+        email,
+        company: meta?.company || parsed.company,
+        jobtitle: meta?.jobtitle || parsed.jobtitle,
         linkedin_url: contact.public_profile_url,
-        enriched_by: result.company ? 'apollo' : 'cargo',
+        enriched_by: meta?.company ? 'cargo+apollo' : 'cargo',
       });
+
+      cargoCount++;
+      console.log(`${label} — ${email} (${meta?.company || parsed.company || 'no company'})`);
     } else {
-      console.log(`${label} — UNENRICHED`);
       failCount++;
       unenriched.push({
         first_name: contact.first_name,
@@ -222,28 +185,22 @@ async function main() {
         linkedin_url: contact.public_profile_url,
         reason: 'no_email_found',
       });
+      console.log(`${label} — UNENRICHED`);
     }
 
     // Save after each contact (crash-safe)
     writeJSON(ENRICHED_FILE, enriched);
     writeJSON(UNENRICHED_FILE, unenriched);
 
-    // Rate limiting delay
-    if (result?.company) {
-      // Apollo was used — 500ms
-      await sleep(500);
-    } else {
-      // Cargo was used or both failed — 1.5s
-      await sleep(1500);
-    }
+    // 1.5s delay between contacts (Cargo rate limit)
+    await sleep(1500);
   }
 
   console.log(`\nDone.`);
-  console.log(`  Enriched (Apollo): ${apolloCount}`);
-  console.log(`  Enriched (Cargo):  ${cargoCount}`);
-  console.log(`  Unenriched:        ${failCount}`);
-  console.log(`  Total enriched:    ${enriched.length}`);
-  console.log(`  Total unenriched:  ${unenriched.length}`);
+  console.log(`  Enriched: ${cargoCount}`);
+  console.log(`  Unenriched: ${failCount}`);
+  console.log(`  Total enriched: ${enriched.length}`);
+  console.log(`  Total unenriched: ${unenriched.length}`);
 }
 
 main();

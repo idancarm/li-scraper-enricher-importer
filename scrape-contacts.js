@@ -7,6 +7,7 @@ const API_KEY = env.UNIPILE_API_KEY;
 const DSN = env.UNIPILE_DSN;
 const ACCOUNT_ID = env.UNIPILE_ACCOUNT_ID;
 const DATA_FILE = 'data/contacts.json';
+const MAX_PAGES = parseInt(process.argv[2], 10) || Infinity;
 
 function request(cursor) {
   return new Promise((resolve, reject) => {
@@ -100,6 +101,11 @@ async function main() {
 
     if (!cursor) {
       console.log('No more pages (cursor is null).');
+      break;
+    }
+
+    if (page >= MAX_PAGES) {
+      console.log(`Reached page limit (${MAX_PAGES}). Re-run to continue.`);
       break;
     }
 
