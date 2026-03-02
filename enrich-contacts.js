@@ -8,6 +8,7 @@ const CARGO_API_KEY = env.CARGO_API_KEY;
 const CONTACTS_FILE = 'data/filtered.json';
 const ENRICHED_FILE = 'data/enriched.json';
 const UNENRICHED_FILE = 'data/unenriched.json';
+const MAX_CONTACTS = parseInt(process.argv[2], 10) || Infinity;
 
 // --- HTTP helpers ---
 
@@ -149,13 +150,14 @@ async function main() {
   ]);
 
   const remaining = contacts.filter((c) => !processed.has(c.public_profile_url));
-  console.log(`Total: ${contacts.length} | Already processed: ${processed.size} | Remaining: ${remaining.length}`);
+  const batch = remaining.slice(0, MAX_CONTACTS);
+  console.log(`Total: ${contacts.length} | Already processed: ${processed.size} | Remaining: ${remaining.length} | Batch: ${batch.length}`);
 
   let cargoCount = 0;
   let failCount = 0;
 
-  for (let i = 0; i < remaining.length; i++) {
-    const contact = remaining[i];
+  for (let i = 0; i < batch.length; i++) {
+    const contact = batch[i];
     const label = `[${processed.size + i + 1}/${contacts.length}] ${contact.first_name} ${contact.last_name}`;
 
     // 1. Try Cargo for email

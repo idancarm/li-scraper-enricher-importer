@@ -57,6 +57,8 @@ const HEADLINE_PATTERNS = [
   { pattern: /into revenue/i, keyword: 'into revenue' },
   { pattern: /into conversions/i, keyword: 'into conversions' },
   { pattern: /let's talk/i, keyword: "let's talk" },
+  { pattern: /\bi help\b/i, keyword: 'i help' },
+  { pattern: /\binbound\b/i, keyword: 'inbound' },
   { pattern: /scaling\s+.*?(companies|businesses|startups|saas)/i, keyword: 'scaling companies' },
   { pattern: /\bcoach\b/i, keyword: 'coach' },
   { pattern: /\bspeaker\b/i, keyword: 'speaker' },
@@ -71,7 +73,8 @@ const HEADLINE_PATTERNS = [
   { pattern: /try\s+\S+\.(com|io|co|ai)/i, keyword: 'try [product URL]' },
   // HubSpot ecosystem
   { pattern: /hubspot consultant/i, keyword: 'hubspot consultant' },
-  { pattern: /hubspot partner/i, keyword: 'hubspot partner' },
+  { pattern: /hubspot\s+.*?partner/i, keyword: 'hubspot partner' },
+  { pattern: /hubspot coach/i, keyword: 'hubspot coach' },
   { pattern: /hubspot certified/i, keyword: 'hubspot certified' },
   { pattern: /hubspot expert/i, keyword: 'hubspot expert' },
   { pattern: /hubspot implementation/i, keyword: 'hubspot implementation' },
