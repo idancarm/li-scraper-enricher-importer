@@ -5,7 +5,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 OUTPUT_DIR = BASE_DIR / "output"
 
 # Supabase
@@ -46,6 +49,19 @@ PERSONAL_EMAIL_DOMAINS = {
     "aol.com", "icloud.com", "me.com", "mail.com",
     "yahoo.co.uk", "hotmail.co.uk", "live.com", "msn.com",
 }
+
+
+def load_actor_secrets() -> dict:
+    """Load actor secrets from environment variables instead of Supabase."""
+    return {
+        "unipile_api_key": os.environ.get("UNIPILE_API_KEY", ""),
+        "unipile_dsn": os.environ.get("UNIPILE_DSN", "") or DEFAULT_UNIPILE_DSN,
+        "unipile_account_id": os.environ.get("UNIPILE_ACCOUNT_ID", ""),
+        "cargo_api_key": os.environ.get("CARGO_API_KEY", ""),
+        "apollo_api_key": os.environ.get("APOLLO_ENRICH_API_KEY", ""),
+        "hubspot_token": os.environ.get("HUBSPOT_API_TOKEN", ""),
+        "anthropic_api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
+    }
 
 
 def ensure_output_dir():

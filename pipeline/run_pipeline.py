@@ -21,7 +21,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .config import ensure_output_dir, OUTPUT_DIR, ICP_CONFIGS_DIR
+from .config import ensure_output_dir, load_actor_secrets, OUTPUT_DIR, ICP_CONFIGS_DIR
 from .supabase_client import (
     get_active_actors,
     get_actor_by_id,
@@ -119,14 +119,16 @@ def run(actor: dict, args: argparse.Namespace):
         if args.export_csv:
             ensure_output_dir()
             from .supabase_client import get_contacts_by_status
-            enriched = get_contacts_by_status(actor_id, "enriched", pipeline_run_id=run_id)
-            imported = get_contacts_by_status(actor_id, "imported", pipeline_run_id=run_id)
-            all_done = enriched + imported
-            if all_done:
+            contacts_to_export = []
+            for status in ("filtered", "enriched", "imported"):
+                contacts_to_export += get_contacts_by_status(
+                    actor_id, status, pipeline_run_id=run_id
+                )
+            if contacts_to_export:
                 date_str = datetime.now().strftime("%Y-%m-%d")
                 csv_path = OUTPUT_DIR / f"{name.replace(' ', '_')}_{date_str}.csv"
-                write_csv(csv_path, all_done)
-                print(f"\nCSV exported: {csv_path}")
+                write_csv(csv_path, contacts_to_export)
+                print(f"\nCSV exported: {csv_path} ({len(contacts_to_export)} contacts)")
 
         # Mark run as completed
         update_pipeline_run(
@@ -168,7 +170,16 @@ def main():
                         help="Run AI ICP review before enrichment")
     parser.add_argument("--export-csv", action="store_true",
                         help="Export results to CSV")
+    parser.add_argument("--review", action="store_true",
+                        help="Review mode: scrape → filter → ICP review → export CSV (no enrich/import)")
     args = parser.parse_args()
+
+    # --review implies ICP review + skip enrich/import + export CSV
+    if args.review:
+        args.icp_review = True
+        args.skip_enrich = True
+        args.skip_import = True
+        args.export_csv = True
 
     if args.actor_id:
         actor = get_actor_by_id(args.actor_id)
@@ -181,7 +192,9 @@ def main():
         actors = get_active_actors()
         print(f"Loaded {len(actors)} active actor(s) from Supabase")
 
+    secrets = load_actor_secrets()
     for actor in actors:
+        actor.update(secrets)
         try:
             run(actor, args)
         except Exception as e:

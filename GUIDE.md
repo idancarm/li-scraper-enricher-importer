@@ -35,7 +35,7 @@ scraped → filtered/excluded → enriched/unenriched → imported
 
 | Table | Purpose |
 |-------|---------|
-| `scraper_actors` | One row per LinkedIn account + API keys |
+| `scraper_actors` | One row per LinkedIn account (non-secret config) |
 | `scraper_pipeline_runs` | Tracks each pipeline execution with stats |
 | `scraper_contacts` | All contacts with status-based progression |
 
@@ -49,18 +49,18 @@ pip3 install -r requirements.txt
 
 ### 2. Create Supabase tables
 
-Run `supabase_schema.sql` in the Supabase SQL editor. This creates the tables and inserts an initial actor row with your API keys.
+Run `supabase_schema.sql` in the Supabase SQL editor. This creates the tables and inserts an initial actor row.
 
 ### 3. Configure environment
 
-Copy `.env.example` to `.env` and add your Supabase service key:
+Copy `.env.example` to `.env` and fill in all API keys:
 
 ```bash
 cp .env.example .env
-# Edit .env and add SUPABASE_SERVICE_KEY
+# Edit .env and add all credentials
 ```
 
-All other credentials (Unipile, Cargo, Apollo, HubSpot) are stored per-actor in the `scraper_actors` table.
+All secrets (Unipile, Cargo, Apollo, HubSpot, Anthropic) are loaded from `.env`. Supabase only stores non-secret actor config (name, active flag, ICP config URL).
 
 ### 4. Verify connectivity
 
@@ -90,6 +90,7 @@ python -m pipeline.run_pipeline --actor-id <UUID> [options]
 | `--skip-import` | Skip the HubSpot import step |
 | `--icp-review` | Run AI ICP review before enrichment |
 | `--export-csv` | Export results to CSV in `output/` |
+| `--review` | Review mode: scrape → filter → ICP review → export CSV (no enrich/import) |
 
 ### Examples
 
@@ -114,6 +115,12 @@ python -m pipeline.run_pipeline --actor-id <UUID> --search-url "https://www.link
 
 # Full pipeline from Sales Navigator search
 python -m pipeline.run_pipeline --actor-id <UUID> --search-url "https://www.linkedin.com/sales/search/people?query=..."
+
+# Review mode: scrape + filter + ICP review + CSV export (no enrich/import)
+python -m pipeline.run_pipeline --actor-id <UUID> --search-url "https://www.linkedin.com/sales/search/people?query=..." --review
+
+# Review mode with page limit
+python -m pipeline.run_pipeline --actor-id <UUID> --search-url "https://www.linkedin.com/sales/search/people?query=..." --review --max-pages 3
 ```
 
 ## Pipeline Steps
@@ -133,7 +140,7 @@ Both modes deduplicate against existing contacts in Supabase per actor. Contacts
 Contacts are updated to `status=filtered` (passed) or `status=excluded` with a reason.
 
 ### Step 2b: ICP Review (optional)
-Uses Claude AI to evaluate filtered contacts against an ICP configuration. Contacts that don't match are excluded. Requires `anthropic_api_key` and `icp_config_url` on the actor.
+Uses Claude AI to evaluate filtered contacts against an ICP configuration. Contacts that don't match are excluded. Requires `ANTHROPIC_API_KEY` in `.env` and `icp_config_url` on the actor.
 
 ### Step 3: Enrich
 **Cargo** (primary): Finds business email by LinkedIn URL.
@@ -147,7 +154,7 @@ Batch-creates contacts in HubSpot with `do_not_email=true`. Handles rate limitin
 
 ## Multi-Actor Support
 
-Each actor in `scraper_actors` has its own set of API keys. The pipeline can process all active actors or target a specific one with `--actor-id`. Contacts are isolated per actor via the `actor_id` foreign key.
+Each actor in `scraper_actors` represents a LinkedIn account. API keys are shared across all actors via `.env`. The pipeline can process all active actors or target a specific one with `--actor-id`. Contacts are isolated per actor via the `actor_id` foreign key.
 
 ## Resume Support
 
